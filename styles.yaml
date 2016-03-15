@@ -1,0 +1,345 @@
+textures:
+    building-grid:
+        url: images/building-grid.gif
+        filtering: mipmap
+
+styles:
+    dashedline:
+        base: lines
+        texcoords: true
+        shaders:
+            blocks:
+                global: |
+                    vec2 mirrorTile(vec2 _st, vec2 _zoom){
+                        _st *= _zoom;
+                        if (fract(_st.y * 0.5) > 0.5){
+                            _st.x = _st.x + 0.5;
+                            _st.y = 1.0 - _st.y;
+                        }
+                        return fract(_st);
+                    }
+                    float fillY(vec2 _st, float _pct,float _antia){
+                      return smoothstep( _pct - _antia, _pct, _st.y);
+                    }
+                    float chevron(vec2 st){
+                        st = mirrorTile(st, vec2(1., 6.));
+                        float x = st.x * 2.;
+                        float a = floor(1. + sin(x * 3.14159));
+                        float b = floor(1. - sin(x * 3.14159));
+                        float f = fract(x);
+                        return fillY(st, mix(a, b, f), 0.01);
+                    }
+                    float stripes(vec2 st){
+                        st = st * 10.;
+                        return step(.5, 1.0 - smoothstep(.3, 1., abs(sin(st.y * 3.14159))));
+                    }
+                    float xMargin(vec2 st, float margin){
+                        return 1.0 - clamp(step(margin * .5, st.x) * step(margin * .5, 1.0 - st.x), 0., 1.);
+                    }
+                color: |
+                    vec2 st = v_texcoord;
+                    vec4 foreground = vec4(0.867,0.867,0.867,1.0);
+                    color = mix(v_color, foreground, stripes(st));
+
+    tools-tilecoords:
+        shaders:
+            blocks:
+                global: |
+                    // Varying to be added to both vertex and fragment shaders
+                    varying vec2 v_pos;
+                    #ifdef TANGRAM_FRAGMENT_SHADER
+                    vec2 TileCoords() {
+                        return fract(v_pos);
+                    }
+                    #endif
+                position: |
+                    v_pos = modelPosition().xy;
+
+    tools-aastep:
+        shaders:
+            extensions: OES_standard_derivatives
+            blocks:
+                global: |
+                    float aastep(float threshold, float value) {
+                        #ifdef TANGRAM_FRAGMENT_SHADER
+                            #ifdef TANGRAM_EXTENSION_OES_standard_derivatives
+                                float afwidth = length(vec2(dFdx(value), dFdy(value))) * 0.70710678118654757;
+                                return smoothstep(threshold - afwidth, threshold + afwidth, value);
+                            #else
+                                return step(threshold, value);
+                            #endif
+                        #else
+                            return step(threshold, value);
+                        #endif
+                    }
+
+    tools-grid:
+        mix: tools-tilecoords
+        shaders:
+            blocks:
+                global: |
+                    #ifdef TANGRAM_FRAGMENT_SHADER
+                    bool grid(vec2 st, float res, float press) {
+                        vec2 grid = fract(st * res);
+                        return (grid.x < res * press) || (grid.y < res * press);
+                    }
+                    float TileGrid(float res) {
+                        vec2 st = TileCoords() * 100. * res;
+                        float pct = 0.0;
+                        float press = 0.4 + (1.0 - fract(u_map_position.z)) * 0.1;
+                        if (grid(st, 0.01, press)) { pct += 0.5; }
+                        if (grid(st, 0.1, press)) { pct += 0.1; }
+                        return pct;
+                    }
+                    float TileGrid() {
+                        return mix(TileGrid(1.), TileGrid(2.), fract(u_map_position.z));
+                    }
+                    #endif
+
+    tools-grain:
+        shaders:
+            blocks:
+                global: |
+                    // Grain
+                    //=============================
+                    float random(vec2 p) {
+                        return fract(1e4 * sin(17.0 * p.x + p.y * 0.1) * (0.1 + abs(sin(p.y * 13.0 + p.x))));
+                    }
+                    float noise(vec2 x) {
+                        vec2 i = floor(x);
+                        vec2 f = fract(x);
+                        float a = random(i);
+                        float b = random(i + vec2(1.0, 0.0));
+                        float c = random(i + vec2(0.0, 1.0));
+                        float d = random(i + vec2(1.0, 1.0));
+                        vec2 u = f * f * (3.0 - 2.0 * f);
+                        return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+                    }
+                    float fbm(in vec2 p) {
+                        float s = 0.0;
+                        float m = 0.0;
+                        float a = 0.5;
+                        for(int i = 0; i < 2; i++ ) {
+                            s += a * noise(p);
+                            m += a;
+                            a *= 0.5;
+                            p *= 2.0;
+                        }
+                        return s/m;
+                    }
+                    float grain(vec2 pos) {
+                        vec2 st = pos / u_resolution.xy - vec2(.5);
+                        return dot(st, st) + (fbm(pos * 0.6) * 0.1);
+                    }
+
+    grid:
+        base: polygons
+        mix: [tools-grain, tools-grid]
+        shaders:
+            blocks:
+                filter: |
+                    color.rgb = vec3(0.899, 0.95, 1.0);
+                    color.rgb -= grain(gl_FragCoord.xy) * 0.1;
+                    color.rgb = mix(color.rgb, vec3(0.639, 0.886, 0.906), TileGrid());
+
+    water_border:
+        base: lines
+        texcoords: true
+        mix: tools-aastep
+        shaders:
+            blocks:
+                global: |
+                    float pulse(float x, float p, float w) {
+                        x = abs(x - p);
+                        if (x > w) { return 0.0; }
+                        x /= w;
+                        return (1.0 - x * x * (3.0 - 2.0 * x));
+                    }
+                width: |
+                    // Comment/Uncomment to fix the line to the border
+                    width *= 1.0 - v_texcoord.x;
+                color: |
+                    vec2 st = v_texcoord.xy;
+                    float pattern = aastep(.5, pulse(st.x, .75, .15) + pulse(st.x, .4, .10) + pulse(st.x, .1, .1));
+                    color.rgb = mix(color.rgb, vec3(0.675,0.855,0.886), pattern);
+
+    shapes-circle:
+        shaders:
+            blocks:
+                global: |
+                    // get distance field of a Circle
+                    // ================================
+                    float circleDF (vec2 st) {
+                        return dot(st,st);
+                    }
+
+    tiling-brick:
+        shaders:
+            blocks:
+                global: |
+                    // Repeats a coordinate space (st) in diferent brick-like tiles
+                    // ================================
+                    vec2 brick(vec2 st, float zoom){
+                        st *= zoom;
+                        // Here is where the offset is happening
+                        st.x += step(1., mod(st.y, 2.0)) * 0.5;
+                        return fract(st);
+                    }
+
+    pattern-dots:
+        mix: [tools-tilecoords, tiling-brick, shapes-circle, tools-aastep]
+        shaders:
+            blocks:
+                global: |
+                    #ifdef TANGRAM_FRAGMENT_SHADER
+                        float TileDots(float scale, float size) {
+                            vec2 tc = TileCoords() * scale * pow(2., floor(u_map_position.z) - abs(u_tile_origin.z));
+                            vec2 IN = brick(tc, 2.);
+                            float A = circleDF(vec2(0.5) - IN) * 1.8;
+                            float d = 0.0;
+                            if (u_map_position.z < 18.) {
+                                vec2 OUT = fract(tc * 2.);
+                                float B = circleDF(vec2(0.25) - OUT) * 7.;
+                                B = min(B, circleDF(vec2(0.75, 0.25) - OUT) * 7.);
+                                B = min(B, circleDF(vec2(0.50, 0.75) - OUT) * 7.);
+                                B = min(B, circleDF(vec2(0.00, 0.75) - OUT) * 7.);
+                                B = min(B, circleDF(vec2(1.00, 0.75) - OUT) * 7.);
+                                d = mix(A, B, pow(fract(u_map_position.z), 10.));
+                            } else {
+                                d = A;
+                            }
+                            return aastep(size, d);
+                        }
+                    #endif
+
+    dots2:
+        base: polygons
+        mix: pattern-dots
+        shaders:
+            blocks:
+                color: |
+                    color.rgb = mix(color.rgb, vec3(0.850), TileDots(45., 0.1));
+                    // size was set to 35 previously, now 45
+
+    dots-rev:
+        base: polygons
+        mix: pattern-dots
+        shaders:
+            blocks:
+                color: |
+                    color.rgb = mix(vec3(0.850), color.rgb, TileDots(45., .21));
+
+    # HSV/RGB functions
+    hsv:
+        shaders:
+            blocks:
+                global: |
+                    vec3 rgb2hsv(vec3 c)
+                    {
+                        vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+                        vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+                        vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+                        float d = q.x - min(q.w, q.y);
+                        float e = 1.0e-10;
+                        return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+                    }
+                    vec3 hsv2rgb(vec3 c)
+                    {
+                        vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+                    }
+
+    scale-buildings:
+        shaders:
+            blocks:
+                position: |
+                    // scale buildings based on zoom
+                    float zoom = u_map_position.z;
+                    float min = .1;       // minimum building scale
+                    float midpoint = 16.; // middle of zoom range
+                    float inspeed = .1;   // number of zooms to scale buildings up
+                    float outspeed = 2.;  // number of zooms to scale buildings back down
+                    float e = 0.;
+
+                    if (zoom >= midpoint) {
+                        e = (zoom - midpoint) / (outspeed * .2);
+                    } else {
+                        e = abs(zoom - midpoint) / inspeed;
+                    }
+                    position.z *= ((1. - min) / (1. + (exp(e)))) + min;
+
+    building-grid:
+        base: polygons
+        # mix: rock
+        lighting: vertex
+        mix: [hsv, scale-buildings]
+        texcoords: true
+        shaders:
+            uniforms:
+                u_tex_grid: building-grid
+            defines:
+                WALL_TINT: vec3(1., 3., .800) # modifies roof color HSV
+            blocks:
+                # applied in vertex shader when using vertex lighting
+                color: |
+                    if (dot(vec3(0., 0., 1.), worldNormal()) < 1.0 - TANGRAM_EPSILON) {
+                        // If it's a wall
+                        color.rgb = hsv2rgb(rgb2hsv(color.rgb) * WALL_TINT);
+                        color.a = 1.0;
+                    } else {
+                        // it's a roof, use vertex color without texture
+                        // using color alpha to differentiate roof/wall
+                        color.a = 0.0;
+                    }
+                # applied in fragment shader
+                filter: |
+                    // if it's roof then use original color (since color.a == 0)
+                    color.rgb = mix(v_color.rgb, vec3(0.),
+                                    color.a * texture2D(u_tex_grid, v_texcoord).a);
+                    color.a = 1.0;
+
+    # building-grid-univ:
+    #     mix: building-grid
+    #     shaders:
+    #         defines:
+    #             ROOF_COLOR: vec3(0.922,0.894,0.862)
+    #             WALL_COLOR: vec3(0.658,0.617,0.576)
+
+    # building-grid-parks:
+    #     mix: building-grid
+    #     shaders:
+    #         defines:
+    #             ROOF_COLOR: vec3(0.847,0.886,0.882)
+    #             WALL_COLOR: vec3(0.627,0.722,0.718)
+
+    # building-grid-hospital:
+    #     mix: building-grid
+    #     shaders:
+    #         defines:
+    #             ROOF_COLOR: vec3(0.941,0.894,0.898)
+    #             WALL_COLOR: vec3(0.692,0.575,0.586)
+
+    # building-grid-retail:
+    #     mix: building-grid
+    #     shaders:
+    #         defines:
+    #             ROOF_COLOR: vec3(0.945,0.898,0.878)
+    #             WALL_COLOR: vec3(0.725,0.694,0.678)
+
+    building-lines:
+        base: lines
+        mix: scale-buildings
+        texcoords: true
+    lines_transparent:
+        base: lines
+        blend: overlay
+    outline_transparent:
+        base: lines
+        blend: overlay
+    polygons_transparent:
+        base: polygons
+        blend: overlay
+    text-blend-order:
+        base: text
+        blend_order: 1
