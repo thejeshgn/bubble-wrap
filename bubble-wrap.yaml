@@ -183,7 +183,7 @@ settings:
         - &grey12      '#cfcfcf'                # generic minor amusements (roller coasters, rides, slide, carousel)
         - &grey12_o    '#c5c5c5'                # generic minor amusements
         - &purple      '#f0e1e1'                # airport
-        - &purple_v    false                    # airport
+        - &purple_v    true                     # airport
         - &purple_b    '#c2c3c4'                # airport buildings
         - &purple_bo   '#969798'                # airport buildings outline
         - &mystry1     '#bfb08e'                # recreation ground
@@ -6191,6 +6191,17 @@ layers:
                     dots2:
                         color: [0.765,0.765,0.765]
                         visible: true
+            dam:
+                filter:
+                    kind: dam
+                draw:
+                    dots2:
+                        visible: true
+                        color: *grey11
+                    lines:
+                        visible: true
+                        color: *grey11_o
+                        width: 5px
 
     landuse-not-filtered:
         data: { source: osm, layer: landuse }
@@ -6219,6 +6230,9 @@ layers:
                 order: function() { return feature.sort_key; }
                 visible: false
             polygons:
+                visible: false
+                order: function() { return feature.sort_key; }
+            lines:
                 visible: false
                 order: function() { return feature.sort_key; }
         runway:
