@@ -203,16 +203,17 @@ map = (function () {
         // Language selector
         var langs = {
             '(default)': false,
-            'English': 'en',
-            'Russian': 'ru',
-            'Chinese': 'zh',
-            'Japanese': 'ja',
-            'Korean': 'ko',
-            'German': 'de',
-            'French': 'fr',
-            'Arabic': 'ar',
-            'Spanish': 'es',
-            'Greek': 'gr'
+            'Kannada': 'kn',
+            'Marathi': 'mr',
+            'Nepali': 'ne',
+            'Tamil': 'ta',
+            'Hindi': 'hi',
+            'Urdu': 'ur',
+            'Malayalam': 'ml',
+            'Bengali': 'bl',
+            'Telugu': 'te',
+            'Punjabi':'pa',
+            'English': 'en'
         };
         // use query language, else default to English
         gui.language = query.language || false;
